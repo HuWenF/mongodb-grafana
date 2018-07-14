@@ -110,8 +110,8 @@ app.all('/query', function(req, res, next)
     setCORSHeaders(res);
 
     // Parse query string in target
-    substitutions = { "$from" : new Date(req.body.range.from),
-                      "$to" : new Date(req.body.range.to),
+    substitutions = { "$from" : new Date(req.body.range.from).getTime(),
+                      "$to" : new Date(req.body.range.to).getTime(),
                       "$dateBucketCount" : getBucketCount(req.body.range.from, req.body.range.to, req.body.intervalMs)
                      }
 
@@ -286,19 +286,38 @@ function runAggregateQuery( requestId, queryId, body, queryArgs, res, next )
             try
             {
               datapoints = []
-              for ( var i = 0; i < docs.length; i++)
+              if (docs.length > 0 && docs[0].type=="ranking")
               {
-                var doc = docs[i]
-                tg = doc.name
-                datapoints.push([doc['value'], doc['ts'].getTime()])
+                 for ( var i = 0; i < docs.length; i++)
+                 {
+                   var doc = docs[i]
+                   tg = doc.name
+                   var tmp = new Date(doc['ts'])
+                   datapoints.push([doc['value'], tmp.getTime() + i])
+                 }
+                 client.close();
+                 var elapsedTimeMs = stopwatch.stop()
+                 var results = { 'target' : tg, 'datapoints' : datapoints }
+                 logTiming(body, elapsedTimeMs, datapoints)
+                 // Mark query as finished - will send back results when all queries finished
+                 queryFinished(requestId, queryId, results, res, next)
               }
-      
-              client.close();
-              var elapsedTimeMs = stopwatch.stop()
-              var results = { 'target' : tg, 'datapoints' : datapoints }
-              logTiming(body, elapsedTimeMs, datapoints)
-              // Mark query as finished - will send back results when all queries finished
-              queryFinished(requestId, queryId, results, res, next)
+              else
+              {
+                 for ( var i = 0; i < docs.length; i++)
+                 {
+                   var doc = docs[i]
+                   tg = doc.name
+                   var tmp = new Date(doc['ts'])
+                   datapoints.push([doc['value'], tmp.getTime()])
+                 }
+                 client.close();
+                 var elapsedTimeMs = stopwatch.stop()
+                 var results = { 'target' : tg, 'datapoints' : datapoints }
+                 logTiming(body, elapsedTimeMs, datapoints)
+                 // Mark query as finished - will send back results when all queries finished
+                 queryFinished(requestId, queryId, results, res, next)
+              }
             }
             catch(err)
             {
@@ -380,7 +399,7 @@ function logTiming(body, elapsedTimeMs, datapoints)
 {
   if (serverConfig.logTimings)
   {
-    var range = new Date(body.range.to) - new Date(body.range.from)
+    var range = new Date(body.range.to).getTime() - new Date(body.range.from).getTime()
     var diff = moment.duration(range)
     
     console.log("Request: " + intervalCount(diff, body.interval, body.intervalMs) + " - Returned " + datapoints.length + " data points in " + elapsedTimeMs.toFixed(2) + "ms")
@@ -404,12 +423,16 @@ function getBucketCount(from, to, intervalMs)
   var boundaries = []
   var current = new Date(from).getTime()
   var toMs = new Date(to).getTime()
+  //var current = from.getTime()
+  //var toMs = to.getTime()
   var count = 0
   while ( current < toMs )
   {
     current += intervalMs
     count++
   }
+  var debug = require('debug')('all')
+  debug('hello');
 
   return count
 }
